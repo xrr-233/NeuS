@@ -1,0 +1,19 @@
+### JOB1 ###########################
+executable      = ~/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --conf ./confs/womask.conf --case bmvs_dog/preprocessed
+# input           =
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB2 ###########################
+executable      = ~/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner_hd.py --mode train --conf ./confs/womask.conf --case bmvs_dog/preprocessed
+# input           =
+output          = NeuS_hd.out
+error           = $(output).err
+log             = NeuS_hd.log
+
+queue
