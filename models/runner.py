@@ -1,9 +1,5 @@
 import os
-os.environ['PATH'] = "/home/bsft19/ruixu33/Programs/anaconda3/bin:/home/bsft19/ruixu33/Programs/anaconda3/condabin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/games:/usr/local/games:/home/bsft19/ruixu33/Programs/anaconda3/bin"
-
-import time
 import logging
-import argparse
 import numpy as np
 import cv2 as cv
 import trimesh
@@ -11,7 +7,6 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from shutil import copyfile
-from icecream import ic
 from tqdm import tqdm
 from pyhocon import ConfigFactory
 from models.dataset import Dataset
@@ -307,6 +302,36 @@ class Runner:
         rays_o = rays_o.reshape(-1, 3).split(self.batch_size)
         rays_d = rays_d.reshape(-1, 3).split(self.batch_size)
 
+        return rays_o, rays_d
+
+        # out_rgb_fine = []
+        # for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
+        #     near, far = self.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
+        #     background_rgb = torch.ones([1, 3]) if self.use_white_bkgd else None
+        #
+        #     render_out = self.renderer.render(rays_o_batch,
+        #                                       rays_d_batch,
+        #                                       near,
+        #                                       far,
+        #                                       cos_anneal_ratio=self.get_cos_anneal_ratio(),
+        #                                       background_rgb=background_rgb)
+        #
+        #     out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
+        #
+        #     del render_out
+        #
+        # img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255).astype(np.uint8)
+        # return img_fine
+
+    def render_novel_image_with_pose(self, pose, resolution_level):
+        """
+        Interpolate view between two cameras.
+        """
+        rays_o, rays_d = self.dataset.gen_rays_with_given_pose(np.array(pose, dtype=np.float32), resolution_level=resolution_level)
+        H, W, _ = rays_o.shape
+        rays_o = rays_o.reshape(-1, 3).split(self.batch_size)
+        rays_d = rays_d.reshape(-1, 3).split(self.batch_size)
+
         out_rgb_fine = []
         for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
             near, far = self.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
@@ -366,40 +391,33 @@ class Runner:
 
         writer.release()
 
-
-if __name__ == '__main__':
-    print('Hello Wooden')
-
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-
-    FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
-    logging.basicConfig(level=logging.DEBUG, format=FORMAT)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--conf', type=str, default='./confs/base.conf')
-    parser.add_argument('--mode', type=str, default='train')
-    parser.add_argument('--mcube_threshold', type=float, default=0.0)
-    parser.add_argument('--is_continue', default=False, action="store_true")
-    parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--case', type=str, default='')
-
-    parser.add_argument('--train_resolution', type=int, default=64)
-    parser.add_argument('--validate_resolution', type=int, default=512)
-    # For rendering
-    parser.add_argument('--render_resolution', type=float, default=4)  # Lower value, clearer effect
-    parser.add_argument('--render_step', type=int, default=60)
-
-    args = parser.parse_args()
-
-    torch.cuda.set_device(args.gpu)
-    runner = Runner(args.conf, args.mode, args.case, args.is_continue)
-
-    if args.mode == 'train':
-        runner.train(resolution=args.train_resolution)
-    elif args.mode == 'validate_mesh':
-        runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)
-    elif args.mode.startswith('interpolate'):  # Interpolate views given two image indices
-        _, img_idx_0, img_idx_1 = args.mode.split('_')
-        img_idx_0 = int(img_idx_0)
-        img_idx_1 = int(img_idx_1)
-        runner.interpolate_view(img_idx_0, img_idx_1, resolution_level=args.render_resolution, n_frames=args.render_step)
+    def funky_town(self, resolution_level, n_frames):
+        images = []
+        # for i in range(n_frames):
+        #     print(i)
+        #     images.append(self.render_novel_image(img_idx_0,
+        #                                           img_idx_1,
+        #                                           np.sin(((i / n_frames) - 0.5) * np.pi) * 0.5 + 0.5,
+        #                                           resolution_level=resolution_level))
+        return self.render_novel_image_with_pose([
+                                            [1, 0, 0, 2],
+                                            [0, 1, 0, 0],
+                                            [0, 0, 1, 0],
+                                            [0, 0, 0, 1]
+                                        ],
+                                        resolution_level=resolution_level)
+        # for i in range(n_frames):
+        #     images.append(images[n_frames - i - 1])
+        #
+        # fourcc = cv.VideoWriter_fourcc(*'mp4v')
+        # video_dir = os.path.join(self.base_exp_dir, 'render')
+        # os.makedirs(video_dir, exist_ok=True)
+        # h, w, _ = images[0].shape
+        # writer = cv.VideoWriter(os.path.join(video_dir,
+        #                                      'funky_town.mp4'),
+        #                         fourcc, 30, (w, h))
+        #
+        # for image in images:
+        #     writer.write(image)
+        #
+        # writer.release()
