@@ -91,7 +91,7 @@ class SDFNetwork(nn.Module):
         return self.forward(x)[:, :1]
 
     def sdf_hidden_appearance(self, x):
-        return self.forward(x)
+        return self.forward(x)[:, 1:]
 
     def gradient(self, x):
         x.requires_grad_(True)

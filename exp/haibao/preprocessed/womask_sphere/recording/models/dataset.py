@@ -100,7 +100,6 @@ class Dataset:
         """
         Generate rays at world space from one camera.
         """
-        print(self.pose_all[img_idx])
         l = resolution_level
         tx = torch.linspace(0, self.W - 1, self.W // l)
         ty = torch.linspace(0, self.H - 1, self.H // l)

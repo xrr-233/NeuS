@@ -27,7 +27,7 @@ def extract_fields(bound_min, bound_max, resolution, query_func):
 
 def extract_geometry(bound_min, bound_max, resolution, threshold, query_func):
     print('threshold: {}'.format(threshold))
-    u = extract_fields(bound_min, bound_max, resolution, query_func)
+    u = extract_fields(bound_min, bound_max, resolution, query_func)  # 应该为SDF值，详情请见https://github.com/pmneila/PyMCubes
     vertices, triangles = mcubes.marching_cubes(u, threshold)
     b_max_np = bound_max.detach().cpu().numpy()
     b_min_np = bound_min.detach().cpu().numpy()
