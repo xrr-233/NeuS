@@ -344,8 +344,7 @@ class Runner:
 
     def interpolate_view(self, img_idx_0, img_idx_1, resolution_level, n_frames):
         images = []
-        for i in range(n_frames):
-            print(i)
+        for i in tqdm(range(n_frames)):
             images.append(self.render_novel_image(img_idx_0,
                                                   img_idx_1,
                                                   np.sin(((i / n_frames) - 0.5) * np.pi) * 0.5 + 0.5,

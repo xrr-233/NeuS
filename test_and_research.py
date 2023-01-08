@@ -38,12 +38,12 @@ if __name__ == '__main__':
     parser.add_argument('--conf', type=str, default='./confs/womask.conf')
     parser.add_argument('--mode', type=str, default='train')
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
-    parser.add_argument('--is_continue', default=False, action="store_true")
+    parser.add_argument('--is_continue', default=True, action="store_true") # default=false
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--case', type=str, default='bmvs_dog/preprocessed')
+    parser.add_argument('--case', type=str, default='haibao/preprocessed')
 
     parser.add_argument('--train_resolution', type=int, default=64)
-    parser.add_argument('--validate_resolution', type=int, default=512)
+    parser.add_argument('--validate_resolution', type=int, default=512)  # Higher value, clearer effect
     # For rendering
     parser.add_argument('--render_resolution', type=float, default=4)  # Lower value, clearer effect
     parser.add_argument('--render_step', type=int, default=60)
@@ -54,7 +54,9 @@ if __name__ == '__main__':
     runner = Runner(args.conf, args.mode, args.case, args.is_continue)
     # visualize_intrinsic()
 
-    runner.funky_town(resolution_level=args.render_resolution, n_frames=args.render_step)
+    # runner.funky_town(resolution_level=args.render_resolution, n_frames=args.render_step)
+    # runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)
+    runner.interpolate_view(0, 26, resolution_level=args.render_resolution, n_frames=args.render_step)
 
     '''if args.mode == 'train':
         runner.train(resolution=args.train_resolution)

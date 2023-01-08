@@ -43,7 +43,7 @@ class Runner:
         self.learning_rate_alpha = self.conf.get_float('train.learning_rate_alpha')
         self.use_white_bkgd = self.conf.get_bool('train.use_white_bkgd')
         self.warm_up_end = self.conf.get_float('train.warm_up_end', default=0.0)
-        self.anneal_end = self.conf.get_float('train.anneal_end', default=0.0)
+        self.anneal_end = self.conf.get_float('train.anneal_end', default=0.0)  # 退火阶段，类似于epsilon-greedy
 
         # Weights
         self.igr_weight = self.conf.get_float('train.igr_weight')
@@ -302,31 +302,34 @@ class Runner:
         rays_o = rays_o.reshape(-1, 3).split(self.batch_size)
         rays_d = rays_d.reshape(-1, 3).split(self.batch_size)
 
-        return rays_o, rays_d
+        out_rgb_fine = []
+        for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
+            near, far = self.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
+            background_rgb = torch.ones([1, 3]) if self.use_white_bkgd else None
 
-        # out_rgb_fine = []
-        # for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
-        #     near, far = self.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
-        #     background_rgb = torch.ones([1, 3]) if self.use_white_bkgd else None
-        #
-        #     render_out = self.renderer.render(rays_o_batch,
-        #                                       rays_d_batch,
-        #                                       near,
-        #                                       far,
-        #                                       cos_anneal_ratio=self.get_cos_anneal_ratio(),
-        #                                       background_rgb=background_rgb)
-        #
-        #     out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
-        #
-        #     del render_out
-        #
-        # img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255).astype(np.uint8)
-        # return img_fine
+            render_out = self.renderer.render(rays_o_batch,
+                                              rays_d_batch,
+                                              near,
+                                              far,
+                                              cos_anneal_ratio=self.get_cos_anneal_ratio(),
+                                              background_rgb=background_rgb)
+
+            out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
+
+            del render_out
+
+        img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255).astype(np.uint8)
+        return img_fine
 
     def render_novel_image_with_pose(self, pose, resolution_level):
         """
         Interpolate view between two cameras.
         """
+        # rays_o, rays_d = self.dataset.gen_rays_at(0, resolution_level=resolution_level)
+        # tensor([[0.8091, -0.5443, 0.2216, -0.2042],
+        #        [0.2398, 0.6501, 0.7210, -1.2162],
+        #        [-0.5365, -0.5302, 0.6565, -1.2660],
+        #        [0.0000, 0.0000, 0.0000, 1.0000]])
         rays_o, rays_d = self.dataset.gen_rays_with_given_pose(np.array(pose, dtype=np.float32), resolution_level=resolution_level)
         H, W, _ = rays_o.shape
         rays_o = rays_o.reshape(-1, 3).split(self.batch_size)
@@ -369,8 +372,7 @@ class Runner:
 
     def interpolate_view(self, img_idx_0, img_idx_1, resolution_level, n_frames):
         images = []
-        for i in range(n_frames):
-            print(i)
+        for i in tqdm(range(n_frames)):
             images.append(self.render_novel_image(img_idx_0,
                                                   img_idx_1,
                                                   np.sin(((i / n_frames) - 0.5) * np.pi) * 0.5 + 0.5,
@@ -393,31 +395,89 @@ class Runner:
 
     def funky_town(self, resolution_level, n_frames):
         images = []
-        # for i in range(n_frames):
-        #     print(i)
-        #     images.append(self.render_novel_image(img_idx_0,
-        #                                           img_idx_1,
-        #                                           np.sin(((i / n_frames) - 0.5) * np.pi) * 0.5 + 0.5,
-        #                                           resolution_level=resolution_level))
-        return self.render_novel_image_with_pose([
-                                            [1, 0, 0, 2],
-                                            [0, 1, 0, 0],
-                                            [0, 0, 1, 0],
-                                            [0, 0, 0, 1]
-                                        ],
-                                        resolution_level=resolution_level)
+
+        begin_pos = [-0.2042, -1.2162, -1.2660]
+        end_pos = [0, 0, 0]
+
+        now_pos = np.array([begin_pos[0], begin_pos[1], begin_pos[2], 1])
+        print(now_pos)
+        original_pos = np.linalg.inv(self.dataset.pose_all[0].cpu().numpy()) @ now_pos
+        print(original_pos)
+
+        RM = [
+            [0.8091, -0.5443, 0.2216],
+            [0.2398, 0.6501, 0.7210],
+            [-0.5365, -0.5302, 0.6565],
+        ]
+        begin_deg = self.RM2EulerDeg(RM)
+        end_deg = np.array([begin_deg[0], begin_deg[1], 0])
+
+        for i in tqdm(range(n_frames)):
+            # images.append(self.render_novel_image_with_pose([
+            #                                     [1, 0, 0, 0],
+            #                                     [0, 1, 0, near + (far - near) / n_frames * i],
+            #                                     [0, 0, 1, 0],
+            #                                     [0, 0, 0, 1]
+            #                                 ],
+            #                                 resolution_level=resolution_level))
+            RM_new = self.euler2RM((begin_deg + (end_deg - begin_deg) / n_frames * i) / 180 * np.pi)
+            print((begin_deg + (end_deg - begin_deg) / n_frames * i))
+            print(RM_new)
+
+            pose = np.zeros((4, 4), dtype=np.float32)
+            pose[3, 3] = 1
+            for j in range(3):
+                pose[j, :3] = RM_new[j]
+                # pose[j, 3] = begin[j] + (end[j] - begin[j]) / n_frames * i
+                pose[j, 3] = begin_pos[j]
+            images.append(self.render_novel_image_with_pose(pose, resolution_level=resolution_level))
         # for i in range(n_frames):
         #     images.append(images[n_frames - i - 1])
         #
-        # fourcc = cv.VideoWriter_fourcc(*'mp4v')
-        # video_dir = os.path.join(self.base_exp_dir, 'render')
-        # os.makedirs(video_dir, exist_ok=True)
-        # h, w, _ = images[0].shape
-        # writer = cv.VideoWriter(os.path.join(video_dir,
-        #                                      'funky_town.mp4'),
-        #                         fourcc, 30, (w, h))
-        #
-        # for image in images:
-        #     writer.write(image)
-        #
-        # writer.release()
+        fourcc = cv.VideoWriter_fourcc(*'mp4v')
+        video_dir = os.path.join(self.base_exp_dir, 'render')
+        os.makedirs(video_dir, exist_ok=True)
+        h, w, _ = images[0].shape
+        writer = cv.VideoWriter(os.path.join(video_dir,
+                                             'funky_town.mp4'),
+                                fourcc, 1, (w, h)) # 数字代表fps
+
+        for image in images:
+            writer.write(image)
+
+        writer.release()
+
+    def RM2Euler(self, RM):
+        theta_z = np.arctan2(RM[1][0], RM[0][0])
+        theta_y = np.arctan2(-1 * RM[2][0], np.sqrt(RM[2][1] * RM[2][1] + RM[2][2] * RM[2][2]))
+        theta_x = np.arctan2(RM[2][1], RM[2][2])
+        # print(f"Euler angles:\ntheta_x: {theta_x}\ntheta_y: {theta_y}\ntheta_z: {theta_z}")
+        return np.array([theta_x, theta_y, theta_z])
+
+    def RM2EulerDeg(self, RM):
+        theta_z = np.arctan2(RM[1][0], RM[0][0]) / np.pi * 180
+        theta_y = np.arctan2(-1 * RM[2][0], np.sqrt(RM[2][1] * RM[2][1] + RM[2][2] * RM[2][2])) / np.pi * 180
+        theta_x = np.arctan2(RM[2][1], RM[2][2]) / np.pi * 180
+        # print(f"Euler angles:\ntheta_x: {theta_x}\ntheta_y: {theta_y}\ntheta_z: {theta_z}")
+        return np.array([theta_x, theta_y, theta_z])
+
+    def euler2RM(self, theta):
+        R_x = np.array([[1, 0, 0],
+                        [0, np.cos(theta[0]), -np.sin(theta[0])],
+                        [0, np.sin(theta[0]), np.cos(theta[0])]
+                        ])
+
+        R_y = np.array([[np.cos(theta[1]), 0, np.sin(theta[1])],
+                        [0, 1, 0],
+                        [-np.sin(theta[1]), 0, np.cos(theta[1])]
+                        ])
+
+        R_z = np.array([[np.cos(theta[2]), -np.sin(theta[2]), 0],
+                        [np.sin(theta[2]), np.cos(theta[2]), 0],
+                        [0, 0, 1]
+                        ])
+
+        R = np.dot(R_z, np.dot(R_y, R_x))
+        # print(f"Rotate matrix:\n{R}")
+        return R
+    # https://blog.csdn.net/weixin_41010198/article/details/115960331

@@ -285,16 +285,16 @@ class NeuSRenderer:
 
     def render(self, rays_o, rays_d, near, far, perturb_overwrite=-1, background_rgb=None, cos_anneal_ratio=0.0):
         batch_size = len(rays_o)
-        sample_dist = 2.0 / self.n_samples   # Assuming the region of interest is a unit sphere
+        sample_dist = 2.0 / self.n_samples   # Assuming the region of interest is a unit sphere，切割ray用的，在直径范围内切成64段
         z_vals = torch.linspace(0.0, 1.0, self.n_samples)
         z_vals = near + (far - near) * z_vals[None, :]
 
-        z_vals_outside = None
+        z_vals_outside = None  # 我猜是超出region of interest的切割，切成32段
         if self.n_outside > 0:
             z_vals_outside = torch.linspace(1e-3, 1.0 - 1.0 / (self.n_outside + 1.0), self.n_outside)
 
         n_samples = self.n_samples
-        perturb = self.perturb
+        perturb = self.perturb  # 扰乱
 
         if perturb_overwrite >= 0:
             perturb = perturb_overwrite
@@ -311,14 +311,17 @@ class NeuSRenderer:
 
         if self.n_outside > 0:
             z_vals_outside = far / torch.flip(z_vals_outside, dims=[-1]) + 1.0 / self.n_samples
+        # print(z_vals[0])
+        # print(z_vals_outside[0]) # 打出来就很明确了，就是rays中的断点所在长度值
 
         background_alpha = None
         background_sampled_color = None
 
         # Up sample
-        if self.n_importance > 0:
+        if self.n_importance > 0:  # n_importance=64，即升采样64个点
             with torch.no_grad():
                 pts = rays_o[:, None, :] + rays_d[:, None, :] * z_vals[..., :, None]
+                # print(pts.shape) 256 * 64 * 3，所有该batch的射线在region of interest中取的点
                 sdf = self.sdf_network.sdf(pts.reshape(-1, 3)).reshape(batch_size, self.n_samples)
 
                 for i in range(self.up_sample_steps):
@@ -334,6 +337,7 @@ class NeuSRenderer:
                                                   new_z_vals,
                                                   sdf,
                                                   last=(i + 1 == self.up_sample_steps))
+                # print(z_vals.shape) 256 * 128 (64+64)
 
             n_samples = self.n_samples + self.n_importance
 

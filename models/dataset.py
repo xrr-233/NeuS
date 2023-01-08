@@ -176,7 +176,7 @@ class Dataset:
         rays_o = pose[None, None, :3, 3].expand(rays_v.shape)  # W, H, 3
         return rays_o.transpose(0, 1), rays_v.transpose(0, 1)
 
-    def near_far_from_sphere(self, rays_o, rays_d):
+    def near_far_from_sphere(self, rays_o, rays_d):  # https://github.com/Totoro97/NeuS/issues/11
         a = torch.sum(rays_d**2, dim=-1, keepdim=True)
         b = 2.0 * torch.sum(rays_o * rays_d, dim=-1, keepdim=True)
         mid = 0.5 * (-b) / a
