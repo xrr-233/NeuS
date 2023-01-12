@@ -1,11 +1,15 @@
 import os
 import logging
 import argparse
+
+import cv2
 import trimesh
 
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
 from models.runner import Runner
 
 def visualize_intrinsic():
@@ -27,7 +31,7 @@ def visualize_intrinsic():
     ax.scatter(x, y, z)
     plt.show()
 
-def set_vertex_color(runner, resolution, threshold):
+def set_vertex_color(runner, resolution, threshold):  # 失败
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
 
@@ -49,6 +53,117 @@ def set_vertex_color(runner, resolution, threshold):
     mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
 
     logging.info('End')
+
+def export_o_v_point_cloud(runner, resolution, threshold, id):
+    rays_o, rays_v = runner.dataset.gen_rays_at(id, resolution_level=16)
+    rays_o = rays_o.cpu().numpy().reshape(-1, 3)[0].reshape(1, 3)
+
+    # 分步理解rays_v
+    # l = 16
+    # tx = torch.linspace(0, runner.dataset.W - 1, runner.dataset.W // l)
+    # ty = torch.linspace(0, runner.dataset.H - 1, runner.dataset.H // l)
+    # pixels_x, pixels_y = torch.meshgrid(tx, ty)
+    # rays_v = torch.stack([pixels_x, pixels_y, torch.ones_like(pixels_y)], dim=-1)  # W, H, 3
+    # rays_v = torch.matmul(runner.dataset.intrinsics_all_inv[id, None, None, :3, :3], rays_v[:, :, :, None]).squeeze()  # 与内参矩阵相乘，W, H, 3
+    # rays_v = rays_v / torch.linalg.norm(rays_v, ord=2, dim=-1, keepdim=True)  # 求L2范式，W, H, 3
+    # rays_v = torch.matmul(runner.dataset.pose_all[id, None, None, :3, :3], rays_v[:, :, :, None]).squeeze()  # W, H, 3
+    rays_v = rays_v.cpu().numpy().reshape(-1, 3)
+
+    bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
+    bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
+    vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+
+    print(rays_o.shape)
+    print(rays_v.shape)
+    print(vertices.shape)
+
+    res = np.concatenate((rays_o, rays_v, vertices), axis=0)
+    print(res.shape)
+    with open('points.txt', 'w') as f:
+        for i in tqdm(range(res.shape[0])):
+            for j in range(res.shape[1]):
+                f.write(f"{res[i][j]} ")
+            f.write('\n')
+
+def export_projection(runner, resolution, threshold):
+    bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
+    bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
+
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
+    vertices = np.array(vertices * runner.dataset.scale_mats_np[0][0, 0] + runner.dataset.scale_mats_np[0][:3, 3][None], dtype=np.float32)
+
+    world_point = np.ones((vertices.shape[0], 4))
+    world_point[:, :3] = vertices
+
+    print(runner.dataset.world_mats_np[0])
+    print(runner.dataset.scale_mats_np[0])
+
+    P = (runner.dataset.world_mats_np[0] @ runner.dataset.scale_mats_np[0])[:3, :4]
+
+    print(world_point[0])
+    print(P)
+    print(runner.dataset.intrinsics_all[0])
+    print(runner.dataset.pose_all[0])
+    image_point = (P @ world_point.T).T
+    print(image_point[0])
+
+    with open('points2.txt', 'w') as f:
+        for i in tqdm(range(image_point.shape[0])):
+            for j in range(image_point.shape[1]):
+                f.write(f"{image_point[i][j]} ")
+            f.write('\n')
+
+def brute_force(runner, resolution, threshold, id):
+    rays_o, rays_v = runner.dataset.gen_rays_at(id, resolution_level=16)
+    # rays_o = rays_o.cpu().numpy().reshape(-1, 3)[0].reshape(1, 3)
+    rays_o = rays_o.cpu().numpy().reshape(-1, 3)
+    rays_v = rays_v.cpu().numpy().reshape(-1, 3)
+
+    bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
+    bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
+    vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+
+    # print(rays_o.shape)
+    # print(rays_v.shape)
+    # print(vertices.shape)
+
+    rays_d = np.zeros(vertices.shape, dtype=np.float32)
+    for i in tqdm(range(vertices.shape[0])):
+        oi = vertices[i] - rays_o[0]
+        oj = rays_v - rays_o
+        theta = np.arccos(np.sum(oi * oj, axis=1) / np.linalg.norm(oi) / np.linalg.norm(oj, axis=1))
+        theta_ray = np.argmin(theta)
+        rays_d[i] = rays_v[theta_ray]
+    rays_o = np.broadcast_to(rays_o[0], rays_d.shape)
+
+    rays_o = torch.tensor(rays_o).split(runner.batch_size)
+    rays_d = torch.tensor(rays_d).split(runner.batch_size)
+    out_rgb_fine = []
+    for rays_o_batch, rays_d_batch in zip(rays_o, rays_d):
+        near, far = runner.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
+        background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
+
+        render_out = runner.renderer.render(rays_o_batch,
+                                          rays_d_batch,
+                                          near,
+                                          far,
+                                          cos_anneal_ratio=runner.get_cos_anneal_ratio(),
+                                          background_rgb=background_rgb)
+
+        out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
+
+        del render_out
+
+    img_fine = np.concatenate(out_rgb_fine, axis=0).reshape((-1, 3))
+    print(img_fine[0])
+    img_fine = cv2.cvtColor(img_fine[:, None, :], cv2.COLOR_RGB2BGR).reshape((-1, 3))
+    print(img_fine[0])
+
+    mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=img_fine)
+    mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
+
 
 if __name__ == '__main__':
     print('Hello Wooden')
@@ -76,9 +191,11 @@ if __name__ == '__main__':
 
     torch.cuda.set_device(args.gpu)
     runner = Runner(args.conf, args.mode, args.case, args.is_continue)
-    # visualize_intrinsic()
 
-    set_vertex_color(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold)
+    # visualize_intrinsic()
+    # set_vertex_color(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold)
+    # export_o_v_point_cloud(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
+    brute_force(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
     # runner.funky_town(resolution_level=args.render_resolution, n_frames=args.render_step)
     # runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)
     # runner.interpolate_view(0, 26, resolution_level=args.render_resolution, n_frames=args.render_step)
