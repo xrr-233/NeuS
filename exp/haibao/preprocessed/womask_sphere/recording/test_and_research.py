@@ -56,8 +56,9 @@ def set_vertex_color(runner, resolution, threshold):  # 失败
 
 def export_o_v_point_cloud(runner, resolution, threshold, id):
     rays_o, rays_v = runner.dataset.gen_rays_at(id, resolution_level=16)
-    rays_o = rays_o.cpu().numpy().reshape(-1, 3)[0].reshape(1, 3)
+    H, W, _ = rays_o.shape
 
+    rays_o = rays_o.cpu().numpy().reshape(-1, 3)[0].reshape(1, 3)
     # 分步理解rays_v
     # l = 16
     # tx = torch.linspace(0, runner.dataset.W - 1, runner.dataset.W // l)
@@ -72,21 +73,24 @@ def export_o_v_point_cloud(runner, resolution, threshold, id):
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
     vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
-    vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+    # vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
 
     print(rays_o.shape)
     print(rays_v.shape)
     print(vertices.shape)
+    print(np.min(vertices, axis=0))
+    print(np.max(vertices, axis=0))
 
-    res = np.concatenate((rays_o, rays_v, vertices), axis=0)
+    res = np.concatenate((rays_o[0].reshape(-1, 3), rays_v, vertices), axis=0)
     print(res.shape)
     with open('points.txt', 'w') as f:
+        f.write(f"{rays_o.shape[0]} {rays_v.shape[0]} {vertices.shape[0]} {H} {W} \n")
         for i in tqdm(range(res.shape[0])):
             for j in range(res.shape[1]):
                 f.write(f"{res[i][j]} ")
             f.write('\n')
 
-def export_projection(runner, resolution, threshold):
+def export_projection(runner, resolution, threshold, id):
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
 
@@ -114,28 +118,79 @@ def export_projection(runner, resolution, threshold):
                 f.write(f"{image_point[i][j]} ")
             f.write('\n')
 
+def validate_image(runner, rays_o, rays_d):
+    print("Validating image")
+    H, W, _ = rays_o.shape
+    rays_o = rays_o.reshape(-1, 3).split(runner.batch_size)
+    rays_d = rays_d.reshape(-1, 3).split(runner.batch_size)
+
+    out_rgb_fine = []
+
+    for rays_o_batch, rays_d_batch in tqdm(zip(rays_o, rays_d)): # 94 for 16
+        near, far = runner.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
+        background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
+
+        render_out = runner.renderer.render(rays_o_batch,
+                                          rays_d_batch,
+                                          near,
+                                          far,
+                                          cos_anneal_ratio=runner.get_cos_anneal_ratio(),
+                                          background_rgb=background_rgb)
+
+        out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
+        del render_out
+
+    img_fine = None
+    if len(out_rgb_fine) > 0:
+        img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255)
+    print(img_fine.shape)
+    cv2.imwrite('validations_fine.png', img_fine)
+    print("Validation end")
+
 def brute_force(runner, resolution, threshold, id):
     rays_o, rays_v = runner.dataset.gen_rays_at(id, resolution_level=16)
-    # rays_o = rays_o.cpu().numpy().reshape(-1, 3)[0].reshape(1, 3)
+    H, W, _ = rays_o.shape
+    validate_image(runner, rays_o, rays_v)
+
     rays_o = rays_o.cpu().numpy().reshape(-1, 3)
     rays_v = rays_v.cpu().numpy().reshape(-1, 3)
-
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
     vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
-    vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+    # vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+    # vertices = np.array(vertices + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
 
-    # print(rays_o.shape)
-    # print(rays_v.shape)
-    # print(vertices.shape)
+    print(rays_o.shape)
+    print(rays_v.shape)
+    print(vertices.shape)
+    print(np.min(vertices, axis=0))
+    print(np.max(vertices, axis=0))
+
+    res = np.concatenate((rays_o[0].reshape(-1, 3), rays_v, vertices), axis=0)
+    print(res.shape)
+    with open('points.txt', 'w') as f:
+        f.write(f"{rays_o.shape[0]} {rays_v.shape[0]} {vertices.shape[0]} {H} {W} \n")
+        for i in tqdm(range(res.shape[0])):
+            for j in range(res.shape[1]):
+                f.write(f"{res[i][j]} ")
+            f.write('\n')
 
     rays_d = np.zeros(vertices.shape, dtype=np.float32)
+    thetas = np.zeros(vertices.shape[0], dtype=np.float32)
     for i in tqdm(range(vertices.shape[0])):
         oi = vertices[i] - rays_o[0]
         oj = rays_v - rays_o
         theta = np.arccos(np.sum(oi * oj, axis=1) / np.linalg.norm(oi) / np.linalg.norm(oj, axis=1))
         theta_ray = np.argmin(theta)
+        thetas[i] = theta_ray
         rays_d[i] = rays_v[theta_ray]
+        if (i == 0):
+            print(oi)
+            print(oj[:10])
+            print(theta[:10])
+            print(theta_ray)
+    print(thetas[:10])
+
     rays_o = np.broadcast_to(rays_o[0], rays_d.shape)
 
     rays_o = torch.tensor(rays_o).split(runner.batch_size)
@@ -157,9 +212,7 @@ def brute_force(runner, resolution, threshold, id):
         del render_out
 
     img_fine = np.concatenate(out_rgb_fine, axis=0).reshape((-1, 3))
-    print(img_fine[0])
     img_fine = cv2.cvtColor(img_fine[:, None, :], cv2.COLOR_RGB2BGR).reshape((-1, 3))
-    print(img_fine[0])
 
     mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=img_fine)
     mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
@@ -195,6 +248,7 @@ if __name__ == '__main__':
     # visualize_intrinsic()
     # set_vertex_color(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold)
     # export_o_v_point_cloud(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
+    # export_projection(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
     brute_force(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
     # runner.funky_town(resolution_level=args.render_resolution, n_frames=args.render_step)
     # runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)

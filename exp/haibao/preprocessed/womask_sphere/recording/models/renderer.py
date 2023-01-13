@@ -31,8 +31,7 @@ def extract_geometry(bound_min, bound_max, resolution, threshold, query_func):
     vertices, triangles = mcubes.marching_cubes(u, threshold)
     b_max_np = bound_max.detach().cpu().numpy()
     b_min_np = bound_min.detach().cpu().numpy()
-
-    vertices = vertices / (resolution - 1.0) * (b_max_np - b_min_np)[None, :] + b_min_np[None, :]
+    vertices = vertices / (resolution - 1.0) * (b_max_np - b_min_np)[None, :] + b_min_np[None, :] # 做了一个translation的操作，将几百的坐标归一化，这样的操作并没有曲解原来sdf坐标的一致性
     return vertices, triangles
 
 
