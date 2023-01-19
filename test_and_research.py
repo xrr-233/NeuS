@@ -118,7 +118,7 @@ def export_projection(runner, resolution, threshold, id):
                 f.write(f"{image_point[i][j]} ")
             f.write('\n')
 
-def validate_image(runner, rays_o, rays_d):
+def validate_image(runner, rays_o, rays_d, filename='validations_fine.png', generate_mask=False):
     print("Validating image")
     H, W, _ = rays_o.shape
     rays_o = rays_o.reshape(-1, 3).split(runner.batch_size)
@@ -126,7 +126,7 @@ def validate_image(runner, rays_o, rays_d):
 
     out_rgb_fine = []
 
-    for rays_o_batch, rays_d_batch in tqdm(zip(rays_o, rays_d)): # 94 for 16
+    for rays_o_batch, rays_d_batch in tqdm(zip(rays_o, rays_d)): # 94 for 16, 23814 for 1
         near, far = runner.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
         background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
 
@@ -135,7 +135,8 @@ def validate_image(runner, rays_o, rays_d):
                                           near,
                                           far,
                                           cos_anneal_ratio=runner.get_cos_anneal_ratio(),
-                                          background_rgb=background_rgb)
+                                          background_rgb=background_rgb,
+                                          generate_mask=generate_mask)
 
         out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
         del render_out
@@ -144,7 +145,7 @@ def validate_image(runner, rays_o, rays_d):
     if len(out_rgb_fine) > 0:
         img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255)
     print(img_fine.shape)
-    cv2.imwrite('validations_fine.png', img_fine)
+    cv2.imwrite(filename, img_fine)
     print("Validation end")
 
 def brute_force(runner, resolution, threshold, id):
@@ -217,6 +218,14 @@ def brute_force(runner, resolution, threshold, id):
     mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=img_fine)
     mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
 
+def generate_mask(runner, generate_mask=True):
+    img_num = runner.dataset.n_images
+    os.makedirs('masks', exist_ok=True)
+
+    for idx in range(img_num):
+        print(idx)
+        rays_o, rays_v = runner.dataset.gen_rays_at(idx, resolution_level=1)
+        validate_image(runner, rays_o, rays_v, filename=os.path.join('masks', '%03d.png' % idx), generate_mask=generate_mask)
 
 if __name__ == '__main__':
     print('Hello Wooden')
@@ -232,7 +241,7 @@ if __name__ == '__main__':
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
     parser.add_argument('--is_continue', default=True, action="store_true") # default=false
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--case', type=str, default='haibao/preprocessed')
+    parser.add_argument('--case', type=str, default='bmvs_dog/preprocessed')
 
     parser.add_argument('--train_resolution', type=int, default=64)
     parser.add_argument('--validate_resolution', type=int, default=128)  # Higher value, clearer effect, 512
@@ -247,10 +256,11 @@ if __name__ == '__main__':
 
     # visualize_intrinsic()
     # set_vertex_color(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold)
-    # export_o_v_point_cloud(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
+    # export_o_v_point_cloud(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=0)
     # export_projection(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
     brute_force(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
     # runner.funky_town(resolution_level=args.render_resolution, n_frames=args.render_step)
+    # generate_mask(runner, generate_mask=False)
     # runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)
     # runner.interpolate_view(0, 26, resolution_level=args.render_resolution, n_frames=args.render_step)
 

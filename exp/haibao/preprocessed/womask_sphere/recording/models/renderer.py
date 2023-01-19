@@ -201,7 +201,8 @@ class NeuSRenderer:
                     background_alpha=None,
                     background_sampled_color=None,
                     background_rgb=None,
-                    cos_anneal_ratio=0.0):
+                    cos_anneal_ratio=0.0,
+                    generate_mask=False):
         batch_size, n_samples = z_vals.shape
 
         # Section length
@@ -261,8 +262,13 @@ class NeuSRenderer:
         weights_sum = weights.sum(dim=-1, keepdim=True)
 
         color = (sampled_color * weights[:, :, None]).sum(dim=1)
-        if background_rgb is not None:    # Fixed background, usually black
-            color = color + background_rgb * (1.0 - weights_sum)
+        if(generate_mask):
+            color = (weights_sum >= 1.0)
+            # color = (weights_sum >= 0.01)
+            color = torch.broadcast_to(color, (-1, 3))
+        else:
+            if background_rgb is not None:    # Fixed background, usually black
+                color = color + background_rgb * (1.0 - weights_sum)
 
         # Eikonal loss
         gradient_error = (torch.linalg.norm(gradients.reshape(batch_size, n_samples, 3), ord=2,
@@ -282,7 +288,7 @@ class NeuSRenderer:
             'inside_sphere': inside_sphere
         }
 
-    def render(self, rays_o, rays_d, near, far, perturb_overwrite=-1, background_rgb=None, cos_anneal_ratio=0.0):
+    def render(self, rays_o, rays_d, near, far, perturb_overwrite=-1, background_rgb=None, cos_anneal_ratio=0.0, generate_mask=False):
         batch_size = len(rays_o)
         sample_dist = 2.0 / self.n_samples   # Assuming the region of interest is a unit sphere，切割ray用的，在直径范围内切成64段
         z_vals = torch.linspace(0.0, 1.0, self.n_samples)
@@ -342,9 +348,13 @@ class NeuSRenderer:
 
         # Background model
         if self.n_outside > 0:
-            z_vals_feed = torch.cat([z_vals, z_vals_outside], dim=-1)
+            z_vals_feed = torch.cat([z_vals, z_vals_outside], dim=-1)  # 128 + 32 = 160
             z_vals_feed, _ = torch.sort(z_vals_feed, dim=-1)
             ret_outside = self.render_core_outside(rays_o, rays_d, z_vals_feed, sample_dist, self.nerf)
+            # print(ret_outside['color'].shape)  # 512 * 3 (512/256就是batch)
+            # print(ret_outside['sampled_color'].shape)  # 512 * 160 * 3
+            # print(ret_outside['alpha'].shape)
+            # print(ret_outside['weights'].shape)
 
             background_sampled_color = ret_outside['sampled_color']
             background_alpha = ret_outside['alpha']
@@ -360,7 +370,8 @@ class NeuSRenderer:
                                     background_rgb=background_rgb,
                                     background_alpha=background_alpha,
                                     background_sampled_color=background_sampled_color,
-                                    cos_anneal_ratio=cos_anneal_ratio)
+                                    cos_anneal_ratio=cos_anneal_ratio,
+                                    generate_mask=generate_mask)
 
         color_fine = ret_fine['color']
         weights = ret_fine['weights']
