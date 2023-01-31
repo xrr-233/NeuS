@@ -111,6 +111,23 @@ class Dataset:
         rays_o = self.pose_all[img_idx, None, None, :3, 3].expand(rays_v.shape)  # W, H, 3
         return rays_o.transpose(0, 1), rays_v.transpose(0, 1)
 
+    def gen_rays_at_no_normalization(self, img_idx, resolution_level=1):
+        """
+        Generate rays at world space from one camera.
+        """
+        intrinsics, pose = load_K_Rt_from_P(None, self.world_mats_np[img_idx][:3, :4])
+        intrinsics_inv = np.linalg.inv(intrinsics)
+        l = resolution_level
+        tx = torch.linspace(0, self.W - 1, self.W // l)
+        ty = torch.linspace(0, self.H - 1, self.H // l)
+        pixels_x, pixels_y = torch.meshgrid(tx, ty)
+        p = torch.stack([pixels_x, pixels_y, torch.ones_like(pixels_y)], dim=-1) # W, H, 3
+        p = torch.matmul(torch.tensor(intrinsics_inv[None, None, :3, :3], dtype=torch.float), p[:, :, :, None]).squeeze()  # W, H, 3
+        rays_v = p / torch.linalg.norm(p, ord=2, dim=-1, keepdim=True)  # W, H, 3
+        rays_v = torch.matmul(torch.tensor(pose[None, None, :3, :3], dtype=torch.float), rays_v[:, :, :, None]).squeeze()  # W, H, 3
+        rays_o = torch.tensor(pose[None, None, :3, 3], dtype=torch.float).expand(rays_v.shape)  # W, H, 3
+        return rays_o.transpose(0, 1), rays_v.transpose(0, 1)
+
     def gen_random_rays_at(self, img_idx, batch_size):
         """
         Generate random rays at world space from one camera.

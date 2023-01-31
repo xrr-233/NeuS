@@ -149,9 +149,9 @@ def validate_image(runner, rays_o, rays_d, filename='validations_fine.png', gene
     print("Validation end")
 
 def brute_force(runner, resolution, threshold, id):
-    rays_o, rays_v = runner.dataset.gen_rays_at(id, resolution_level=16)
+    rays_o, rays_v = runner.dataset.gen_rays_at_no_normalization(id, resolution_level=16)
     H, W, _ = rays_o.shape
-    validate_image(runner, rays_o, rays_v)
+    # validate_image(runner, rays_o, rays_v)
 
     rays_o = rays_o.cpu().numpy().reshape(-1, 3)
     rays_v = rays_v.cpu().numpy().reshape(-1, 3)
@@ -160,15 +160,23 @@ def brute_force(runner, resolution, threshold, id):
     vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
     # vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
     # vertices = np.array(vertices + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+    print(runner.dataset.scale_mats_np[id])
+    print(rays_o[0])
+    rays_o_scale = rays_o
+    rays_v_scale = rays_v
+    # rays_o_scale = np.array(rays_o * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+    # rays_v_scale = np.array(rays_v * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
+    print(rays_o_scale[0])
 
-    print(rays_o.shape)
-    print(rays_v.shape)
-    print(vertices.shape)
+    # print(rays_o.shape)
+    # print(rays_v.shape)
+    # print(vertices.shape)
     print(np.min(vertices, axis=0))
     print(np.max(vertices, axis=0))
 
-    res = np.concatenate((rays_o[0].reshape(-1, 3), rays_v, vertices), axis=0)
-    print(res.shape)
+    res = np.concatenate((rays_o_scale[0].reshape(-1, 3), rays_v_scale, vertices), axis=0)
+    # print(res.shape)
+    print("Writing points.txt")
     with open('points.txt', 'w') as f:
         f.write(f"1 {rays_v.shape[0]} {vertices.shape[0]} {H} {W} \n")
         for i in tqdm(range(res.shape[0])):
@@ -176,20 +184,21 @@ def brute_force(runner, resolution, threshold, id):
                 f.write(f"{res[i][j]} ")
             f.write('\n')
 
+    print("Giving vertex color")
     rays_d = np.zeros(vertices.shape, dtype=np.float32)
     thetas = np.zeros(vertices.shape[0], dtype=np.float32)
     for i in tqdm(range(vertices.shape[0])):
-        oi = vertices[i] - rays_o[0]
-        oj = rays_v - rays_o
+        oi = vertices[i] - rays_o_scale[0]
+        oj = rays_v_scale - rays_o_scale
         theta = np.arccos(np.sum(oi * oj, axis=1) / np.linalg.norm(oi) / np.linalg.norm(oj, axis=1))
         theta_ray = np.argmin(theta)
         thetas[i] = theta_ray
         rays_d[i] = rays_v[theta_ray]
-        if (i == 0):
-            print(oi)
-            print(oj[:10])
-            print(theta[:10])
-            print(theta_ray)
+        # if (i == 0):
+        #     print(oi)
+        #     print(oj[:10])
+        #     print(theta[:10])
+        #     print(theta_ray)
     print(thetas[:10])
 
     rays_o = np.broadcast_to(rays_o[0], rays_d.shape)
@@ -241,7 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
     parser.add_argument('--is_continue', default=True, action="store_true") # default=false
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--case', type=str, default='bmvs_dog/preprocessed')
+    parser.add_argument('--case', type=str, default='haibao/preprocessed')
 
     parser.add_argument('--train_resolution', type=int, default=64)
     parser.add_argument('--validate_resolution', type=int, default=128)  # Higher value, clearer effect, 512
