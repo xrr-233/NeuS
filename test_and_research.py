@@ -1,16 +1,16 @@
 import os
 import logging
 import argparse
-
 import cv2
 import trimesh
-
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
 from models.runner import Runner
+
+runner = None
+
 
 def visualize_intrinsic():
     rays_o, rays_v = runner.dataset.gen_rays_at(0, resolution_level=4)
@@ -31,30 +31,8 @@ def visualize_intrinsic():
     ax.scatter(x, y, z)
     plt.show()
 
-def set_vertex_color(runner, resolution, threshold):  # 失败
-    bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
-    bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
 
-    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
-    vertices = np.array(vertices * runner.dataset.scale_mats_np[0][0, 0] + runner.dataset.scale_mats_np[0][:3, 3][None], dtype=np.float32)
-
-    appearance_feature = runner.sdf_network.sdf_hidden_appearance(torch.tensor(vertices))
-    surface_normal = runner.sdf_network.gradient(torch.tensor(vertices)).squeeze()
-
-    view_dir = np.zeros((vertices.shape[0], 3), dtype=np.float32)
-    view_dir[:, 2] = 1
-    print(view_dir)
-
-    vertex_color = runner.color_network.forward(torch.tensor(vertices), surface_normal, torch.tensor(view_dir), appearance_feature).cpu().detach().numpy()
-    print(vertex_color)
-    print(vertices.shape, triangles.shape, vertex_color.shape)
-
-    mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_color)
-    mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
-
-    logging.info('End')
-
-def export_o_v_point_cloud(runner, resolution, threshold, id):
+def export_o_v_point_cloud(resolution, threshold, id):
     rays_o, rays_v = runner.dataset.gen_rays_at(id, resolution_level=16)
     H, W, _ = rays_o.shape
 
@@ -72,7 +50,8 @@ def export_o_v_point_cloud(runner, resolution, threshold, id):
 
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
-    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution,
+                                                           threshold=threshold)
     # vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
 
     print(rays_o.shape)
@@ -90,12 +69,15 @@ def export_o_v_point_cloud(runner, resolution, threshold, id):
                 f.write(f"{res[i][j]} ")
             f.write('\n')
 
-def export_projection(runner, resolution, threshold, id):
+
+def export_projection(resolution, threshold, id):
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
 
-    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
-    vertices = np.array(vertices * runner.dataset.scale_mats_np[0][0, 0] + runner.dataset.scale_mats_np[0][:3, 3][None], dtype=np.float32)
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution,
+                                                           threshold=threshold)
+    vertices = np.array(vertices * runner.dataset.scale_mats_np[0][0, 0] + runner.dataset.scale_mats_np[0][:3, 3][None],
+                        dtype=np.float32)
 
     world_point = np.ones((vertices.shape[0], 4))
     world_point[:, :3] = vertices
@@ -118,7 +100,8 @@ def export_projection(runner, resolution, threshold, id):
                 f.write(f"{image_point[i][j]} ")
             f.write('\n')
 
-def validate_image(runner, rays_o, rays_d, filename='validations_fine.png', generate_mask=False):
+
+def validate_image(rays_o, rays_d, filename='validations_fine.png', generate_mask=False):
     print("Validating image")
     H, W, _ = rays_o.shape
     rays_o = rays_o.reshape(-1, 3).split(runner.batch_size)
@@ -126,17 +109,17 @@ def validate_image(runner, rays_o, rays_d, filename='validations_fine.png', gene
 
     out_rgb_fine = []
 
-    for rays_o_batch, rays_d_batch in tqdm(zip(rays_o, rays_d)): # 94 for 16, 23814 for 1
+    for rays_o_batch, rays_d_batch in tqdm(zip(rays_o, rays_d)):  # 94 for 16, 23814 for 1
         near, far = runner.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
         background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
 
         render_out = runner.renderer.render(rays_o_batch,
-                                          rays_d_batch,
-                                          near,
-                                          far,
-                                          cos_anneal_ratio=runner.get_cos_anneal_ratio(),
-                                          background_rgb=background_rgb,
-                                          generate_mask=generate_mask)
+                                            rays_d_batch,
+                                            near,
+                                            far,
+                                            cos_anneal_ratio=runner.get_cos_anneal_ratio(),
+                                            background_rgb=background_rgb,
+                                            generate_mask=generate_mask)
 
         out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
         del render_out
@@ -148,7 +131,8 @@ def validate_image(runner, rays_o, rays_d, filename='validations_fine.png', gene
     cv2.imwrite(filename, img_fine)
     print("Validation end")
 
-def brute_force(runner, resolution, threshold, id):
+
+def brute_force(resolution, threshold, id):
     rays_o, rays_v = runner.dataset.gen_rays_at_no_normalization(id, resolution_level=16)
     H, W, _ = rays_o.shape
     # validate_image(runner, rays_o, rays_v)
@@ -157,7 +141,8 @@ def brute_force(runner, resolution, threshold, id):
     rays_v = rays_v.cpu().numpy().reshape(-1, 3)
     bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
     bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
-    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution,
+                                                           threshold=threshold)
     # vertices = np.array(vertices * runner.dataset.scale_mats_np[id][0, 0] + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
     # vertices = np.array(vertices + runner.dataset.scale_mats_np[id][:3, 3][None], dtype=np.float32)
     print(runner.dataset.scale_mats_np[id])
@@ -211,11 +196,11 @@ def brute_force(runner, resolution, threshold, id):
         background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
 
         render_out = runner.renderer.render(rays_o_batch,
-                                          rays_d_batch,
-                                          near,
-                                          far,
-                                          cos_anneal_ratio=runner.get_cos_anneal_ratio(),
-                                          background_rgb=background_rgb)
+                                            rays_d_batch,
+                                            near,
+                                            far,
+                                            cos_anneal_ratio=runner.get_cos_anneal_ratio(),
+                                            background_rgb=background_rgb)
 
         out_rgb_fine.append(render_out['color_fine'].detach().cpu().numpy())
 
@@ -227,14 +212,117 @@ def brute_force(runner, resolution, threshold, id):
     mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=img_fine)
     mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
 
-def generate_mask(runner, generate_mask=True):
+
+def set_vertex_color(resolution, threshold):
+    manually_set_id = 29
+    filename = 'test_render.png'
+
+    rays_o, rays_d = runner.dataset.gen_rays_at(manually_set_id, resolution_level=8)  # 4
+    H, W, _ = rays_o.shape
+    rays_o = rays_o.reshape(-1, 3).split(runner.batch_size)
+    rays_d = rays_d.reshape(-1, 3).split(runner.batch_size)
+    print(H, W)
+
+    render_iter = len(rays_o)
+    pts = []
+    sphere_colors = []
+    weights = []
+
+    out_rgb_fine = np.zeros((H * 2, W * 2, 3))
+    block_id = 0
+    render_intermediate = False
+    for iter in tqdm(range(render_iter)):
+        rays_o_batch = rays_o[iter]
+        rays_d_batch = rays_d[iter]
+        near, far = runner.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
+        background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
+
+        render_out = runner.renderer.render(rays_o_batch,
+                                            rays_d_batch,
+                                            near,
+                                            far,
+                                            cos_anneal_ratio=runner.get_cos_anneal_ratio(),
+                                            background_rgb=background_rgb)
+        pt = render_out['pts'].detach().cpu().numpy()
+        sphere_color = render_out['sphere_colors'].detach().cpu().numpy()
+        weight = render_out['weights'][:,
+                 :runner.renderer.n_samples + runner.renderer.n_importance].detach().cpu().numpy()
+        pts.append(pt)
+        sphere_colors.append(sphere_color)
+        weights.append(weight)
+
+        render_out = render_out['color_fine'].detach().cpu().numpy()
+        for i in range(render_out.shape[0]):
+            out_rgb_fine[int(block_id / W) * 2, (block_id % W) * 2, :] = render_out[i]
+            out_rgb_fine[int(block_id / W) * 2, (block_id % W) * 2 + 1, :] = render_out[i]
+            out_rgb_fine[int(block_id / W) * 2 + 1, (block_id % W) * 2, :] = render_out[i]
+            out_rgb_fine[int(block_id / W) * 2 + 1, (block_id % W) * 2 + 1, :] = render_out[i]
+            block_id += 1
+        del render_out
+
+        if (render_intermediate):
+            cv2.imshow('image', out_rgb_fine)
+            cv2.waitKey(0)
+
+    pts = np.concatenate(pts).reshape((-1, 3))
+    sphere_colors = np.concatenate(sphere_colors).reshape((-1, 3))
+    sphere_colors = sphere_colors[..., ::-1]  # BGR to RGB
+    weights = np.concatenate(weights).reshape((-1))
+    print(pts.shape)
+    pts = pts[weights > 0.25]
+    sphere_colors = sphere_colors[weights > 0.25]
+    print(pts.shape)
+
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=sphere_colors)
+    plt.show()
+
+    # img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255)
+    # cv2.imwrite(filename, img_fine)
+
+    # bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
+    # bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
+    #
+    # vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution,
+    #                                                        threshold=threshold)
+    # vertices = np.array(vertices * runner.dataset.scale_mats_np[0][0, 0] + runner.dataset.scale_mats_np[0][:3, 3][None],
+    #                     dtype=np.float32)
+    #
+    # appearance_feature = runner.sdf_network.sdf_hidden_appearance(torch.tensor(vertices))
+    # surface_normal = runner.sdf_network.gradient(torch.tensor(vertices)).squeeze()
+    #
+    # view_dir = np.zeros((vertices.shape[0], 3), dtype=np.float32)
+    # view_dir[:, 2] = 1
+    # print(view_dir)
+    #
+    # vertex_color = runner.color_network.forward(torch.tensor(vertices), surface_normal, torch.tensor(view_dir),
+    #                                             appearance_feature).cpu().detach().numpy()
+    # print(vertex_color)
+    # print(vertices.shape, triangles.shape, vertex_color.shape)
+    #
+    # mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_color)
+    # mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
+    #
+    # logging.info('End')
+
+
+def generate_mask(generate_mask=True):
     img_num = runner.dataset.n_images
     os.makedirs('masks', exist_ok=True)
 
     for idx in range(img_num):
         print(idx)
         rays_o, rays_v = runner.dataset.gen_rays_at(idx, resolution_level=1)
-        validate_image(runner, rays_o, rays_v, filename=os.path.join('masks', '%03d.png' % idx), generate_mask=generate_mask)
+        validate_image(runner, rays_o, rays_v, filename=os.path.join('masks', '%03d.png' % idx),
+                       generate_mask=generate_mask)
+
 
 if __name__ == '__main__':
     print('Hello Wooden')
@@ -248,14 +336,14 @@ if __name__ == '__main__':
     parser.add_argument('--conf', type=str, default='./confs/womask.conf')
     parser.add_argument('--mode', type=str, default='train')
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
-    parser.add_argument('--is_continue', default=True, action="store_true") # default=false
+    parser.add_argument('--is_continue', default=True, action="store_true")  # default=false
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--case', type=str, default='haibao/preprocessed')
 
     parser.add_argument('--train_resolution', type=int, default=64)
-    parser.add_argument('--validate_resolution', type=int, default=128)  # Higher value, clearer effect, 512
+    parser.add_argument('--validate_resolution', type=int, default=128)  # Higher value, clearer effect, 512 决定插值数量
     # For rendering
-    parser.add_argument('--render_resolution', type=float, default=4)  # Lower value, clearer effect
+    parser.add_argument('--render_resolution', type=float, default=4)  # Lower value, clearer effect, 4 决定合并像素
     parser.add_argument('--render_step', type=int, default=60)
 
     args = parser.parse_args()
@@ -264,16 +352,14 @@ if __name__ == '__main__':
     runner = Runner(args.conf, args.mode, args.case, args.is_continue)
 
     # visualize_intrinsic()
-    # set_vertex_color(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold)
+    set_vertex_color(resolution=args.validate_resolution, threshold=args.mcube_threshold)
     # export_o_v_point_cloud(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=0)
     # export_projection(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
-    brute_force(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
+    # brute_force(runner, resolution=args.validate_resolution, threshold=args.mcube_threshold, id=14)
     # runner.funky_town(resolution_level=args.render_resolution, n_frames=args.render_step)
     # generate_mask(runner, generate_mask=False)
     # runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)
     # runner.interpolate_view(0, 26, resolution_level=args.render_resolution, n_frames=args.render_step)
-
-    # Hi @will-thomson4, we do not need to generate rays to get a vertex color. Two networks are used in this work, one is the SDF network F, which takes the point coordinate as input, outputting the SDF value and the appearance feature vector; another is the rendering network G, which takes the appearance feature vector, the view direction and the surface normal as input, and outputs the color value. To get the color of a vertex, you may **first query the F network** to get the appearance feature and the surface normal (i.e., the gradient of SDF), manually assign an expected view direction, and feed them to the network G to get the vertex color.
 
     '''if args.mode == 'train':
         runner.train(resolution=args.train_resolution)
