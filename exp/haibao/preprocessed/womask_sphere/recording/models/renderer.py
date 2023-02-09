@@ -377,7 +377,7 @@ class NeuSRenderer:
 
             # min_v = min(sdf)
             # max_v = max(sdf)
-            # color = [plt.get_cmap("seismic", 100)(int(float(i - min_v) / (max_v - min_v) * 100)) for i in sdf[:256]]
+            # color = [plt.get_cmap("seismic", 100)(int(float(i - min_v) / (max_v - min_v) * 100)) for i in sdf]
             color = np.zeros((batch_size, n_samples, 4))
             color[:, :, :3] = sphere_color.detach().cpu().numpy()
             # color[:, :, 3] = 1
@@ -408,8 +408,7 @@ class NeuSRenderer:
                     y.append(pt[i, 1])
                     z.append(pt[i, 2])
                     a.append(color[i])
-            # im = ax.scatter(pts[i, 0].detach().cpu().numpy(), pts[i, 1].detach().cpu().numpy(), pts[i, 2].detach().cpu().numpy(), c=color)
-            ax.scatter(x, y, z, c=a)
+            im = ax.scatter(x, y, z, c=a)
             # fig.colorbar(im, format=FuncFormatter(lambda x, _: x * (max_v - min_v) + min_v))
             plt.show()
         # endregion

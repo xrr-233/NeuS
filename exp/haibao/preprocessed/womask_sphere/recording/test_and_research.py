@@ -317,9 +317,9 @@ def set_vertex_color(resolution, threshold):
 
     vertex_colors = []
     for iter in tqdm(range(render_iter)):
-        dirs = vertices_batch[iter] - rays_o_batch[iter]
         feature_vector = runner.sdf_network.sdf_hidden_appearance(vertices_batch[iter])
         gradients = runner.sdf_network.gradient(vertices_batch[iter]).squeeze()
+        dirs = -gradients
         vertex_color = runner.color_network(vertices_batch[iter], gradients, dirs, feature_vector).detach().cpu().numpy()[..., ::-1]  # BGR to RGB
         vertex_colors.append(vertex_color)
     # appearance_feature = runner.sdf_network.sdf_hidden_appearance(torch.tensor(vertices))
