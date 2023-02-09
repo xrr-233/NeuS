@@ -219,11 +219,13 @@ def set_vertex_color(resolution, threshold):
 
     rays_o, rays_d = runner.dataset.gen_rays_at(manually_set_id, resolution_level=8)  # 4
     H, W, _ = rays_o.shape
-    rays_o = rays_o.reshape(-1, 3).split(runner.batch_size)
-    rays_d = rays_d.reshape(-1, 3).split(runner.batch_size)
+    rays_o = rays_o.reshape(-1, 3)
+    rays_d = rays_d.reshape(-1, 3)
+    rays_o_batch = rays_o.split(runner.batch_size)
+    rays_d_batch = rays_d.split(runner.batch_size)
     print(H, W)
 
-    render_iter = len(rays_o)
+    render_iter = len(rays_o_batch)
     pts = []
     sphere_colors = []
     weights = []
@@ -232,21 +234,18 @@ def set_vertex_color(resolution, threshold):
     block_id = 0
     render_intermediate = False
     for iter in tqdm(range(render_iter)):
-        rays_o_batch = rays_o[iter]
-        rays_d_batch = rays_d[iter]
-        near, far = runner.dataset.near_far_from_sphere(rays_o_batch, rays_d_batch)
+        near, far = runner.dataset.near_far_from_sphere(rays_o_batch[iter], rays_d_batch[iter])
         background_rgb = torch.ones([1, 3]) if runner.use_white_bkgd else None
 
-        render_out = runner.renderer.render(rays_o_batch,
-                                            rays_d_batch,
+        render_out = runner.renderer.render(rays_o_batch[iter],
+                                            rays_d_batch[iter],
                                             near,
                                             far,
                                             cos_anneal_ratio=runner.get_cos_anneal_ratio(),
                                             background_rgb=background_rgb)
         pt = render_out['pts'].detach().cpu().numpy()
         sphere_color = render_out['sphere_colors'].detach().cpu().numpy()
-        weight = render_out['weights'][:,
-                 :runner.renderer.n_samples + runner.renderer.n_importance].detach().cpu().numpy()
+        weight = render_out['weights'][:, :runner.renderer.n_samples + runner.renderer.n_importance].detach().cpu().numpy()
         pts.append(pt)
         sphere_colors.append(sphere_color)
         weights.append(weight)
@@ -268,33 +267,61 @@ def set_vertex_color(resolution, threshold):
     sphere_colors = np.concatenate(sphere_colors).reshape((-1, 3))
     sphere_colors = sphere_colors[..., ::-1]  # BGR to RGB
     weights = np.concatenate(weights).reshape((-1))
-    print(pts.shape)
-    pts = pts[weights > 0.25]
-    sphere_colors = sphere_colors[weights > 0.25]
-    print(pts.shape)
+    print(f'before processing: {pts.shape[0]}')
+    weight_threshold = 0.25
+    pts = pts[weights > weight_threshold]
+    sphere_colors = sphere_colors[weights > weight_threshold]
+    print(f'after processing: {pts.shape[0]}')
 
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
+    bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
+    bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
+    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
+    print(f'vertice count: {vertices.shape[0]}')
 
-    fig = plt.figure()
-    ax = Axes3D(fig)
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('z')
-    ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=sphere_colors)
-    plt.show()
+    # print("Matplotlib show")
+    # import matplotlib.pyplot as plt
+    # from mpl_toolkits.mplot3d import Axes3D
+    #
+    # fig = plt.figure()
+    # ax = Axes3D(fig)
+    # ax.set_xlabel('x')
+    # ax.set_ylabel('y')
+    # ax.set_zlabel('z')
+    # ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=sphere_colors)
+    # ax.scatter(vertices[:, 0], vertices[:, 1], vertices[:, 2], c='gray')
+    # plt.show()
 
+    # print("Writing rendered image")
     # img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255)
     # cv2.imwrite(filename, img_fine)
 
-    # bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
-    # bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
-    #
-    # vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution,
-    #                                                        threshold=threshold)
-    # vertices = np.array(vertices * runner.dataset.scale_mats_np[0][0, 0] + runner.dataset.scale_mats_np[0][:3, 3][None],
-    #                     dtype=np.float32)
-    #
+    # print("Writing points.txt")
+    # with open('points.txt', 'w') as f:
+    #     for i in tqdm(range(pts.shape[0])):
+    #         for j in range(pts.shape[1]):
+    #             f.write(f"{pts[i][j]} ")
+    #         for j in range(sphere_colors.shape[1]):
+    #             f.write(f"{sphere_colors[i][j]} ")
+    #         f.write('\n')
+    #     for i in tqdm(range(vertices.shape[0])):
+    #         for j in range(vertices.shape[1]):
+    #             f.write(f"{vertices[i][j]} ")
+    #         for j in range(3):
+    #             f.write(f"{0.5} ")
+    #         f.write('\n')
+
+    vertices = torch.tensor(vertices, dtype=torch.float32)
+    vertices_batch = vertices.split(runner.batch_size)
+    rays_o_batch = rays_o[0].expand(vertices.shape).split(runner.batch_size)
+    render_iter = len(rays_o_batch)
+
+    vertex_colors = []
+    for iter in tqdm(range(render_iter)):
+        dirs = vertices_batch[iter] - rays_o_batch[iter]
+        feature_vector = runner.sdf_network.sdf_hidden_appearance(vertices_batch[iter])
+        gradients = runner.sdf_network.gradient(vertices_batch[iter]).squeeze()
+        vertex_color = runner.color_network(vertices_batch[iter], gradients, dirs, feature_vector).detach().cpu().numpy()[..., ::-1]  # BGR to RGB
+        vertex_colors.append(vertex_color)
     # appearance_feature = runner.sdf_network.sdf_hidden_appearance(torch.tensor(vertices))
     # surface_normal = runner.sdf_network.gradient(torch.tensor(vertices)).squeeze()
     #
@@ -304,13 +331,15 @@ def set_vertex_color(resolution, threshold):
     #
     # vertex_color = runner.color_network.forward(torch.tensor(vertices), surface_normal, torch.tensor(view_dir),
     #                                             appearance_feature).cpu().detach().numpy()
-    # print(vertex_color)
-    # print(vertices.shape, triangles.shape, vertex_color.shape)
-    #
-    # mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_color)
-    # mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
-    #
-    # logging.info('End')
+    vertex_colors = np.concatenate(vertex_colors)
+    print(f'validate point count: {vertex_colors.shape[0]}')
+    vertices = vertices.detach().cpu().numpy()
+    print(vertices.shape, triangles.shape, vertex_colors.shape)
+
+    mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_colors)
+    mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
+
+    logging.info('End')
 
 
 def generate_mask(generate_mask=True):
@@ -341,7 +370,7 @@ if __name__ == '__main__':
     parser.add_argument('--case', type=str, default='haibao/preprocessed')
 
     parser.add_argument('--train_resolution', type=int, default=64)
-    parser.add_argument('--validate_resolution', type=int, default=128)  # Higher value, clearer effect, 512 决定插值数量
+    parser.add_argument('--validate_resolution', type=int, default=512)  # Higher value, clearer effect, 512 决定插值数量
     # For rendering
     parser.add_argument('--render_resolution', type=float, default=4)  # Lower value, clearer effect, 4 决定合并像素
     parser.add_argument('--render_step', type=int, default=60)
