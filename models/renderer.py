@@ -27,12 +27,12 @@ def extract_fields(bound_min, bound_max, resolution, query_func):
 
 def extract_geometry(bound_min, bound_max, resolution, threshold, query_func):
     print('threshold: {}'.format(threshold))
-    u = extract_fields(bound_min, bound_max, resolution, query_func)  # 应该为SDF值，详情请见https://github.com/pmneila/PyMCubes
+    u = extract_fields(bound_min, bound_max, resolution, query_func)
     vertices, triangles = mcubes.marching_cubes(u, threshold)
     b_max_np = bound_max.detach().cpu().numpy()
     b_min_np = bound_min.detach().cpu().numpy()
-    vertices = vertices / (resolution - 1.0) * (b_max_np - b_min_np)[None, :] + b_min_np[None,
-                                                                                :]  # 做了一个translation的操作，将几百的坐标归一化，这样的操作并没有曲解原来sdf坐标的一致性
+
+    vertices = vertices / (resolution - 1.0) * (b_max_np - b_min_np)[None, :] + b_min_np[None, :]
     return vertices, triangles
 
 
@@ -265,7 +265,6 @@ class NeuSRenderer:
         color = (sampled_color * weights[:, :, None]).sum(dim=1)
         if (generate_mask):
             color = (weights_sum >= 1.0)
-            # color = (weights_sum >= 0.01)
             color = torch.broadcast_to(color, (-1, 3))
         else:
             if background_rgb is not None:  # Fixed background, usually black
@@ -283,159 +282,6 @@ class NeuSRenderer:
             'gradients': gradients.reshape(batch_size, n_samples, 3),
             's_val': 1.0 / inv_s,
             'mid_z_vals': mid_z_vals,
-            'weights': weights,
-            'cdf': c.reshape(batch_size, n_samples),
-            'gradient_error': gradient_error,
-            'inside_sphere': inside_sphere
-        }
-
-    def render_core_research(self,
-                             rays_o,
-                             rays_d,
-                             z_vals,
-                             sample_dist,
-                             sdf_network,
-                             deviation_network,
-                             color_network,
-                             background_alpha=None,
-                             background_sampled_color=None,
-                             background_rgb=None,
-                             cos_anneal_ratio=0.0,
-                             generate_mask=False):
-        batch_size, n_samples = z_vals.shape
-        # print(f'batch size (512): {batch_size}')
-        # print(f'n_samples (128): {n_samples}')
-
-        # Section length
-        dists = z_vals[..., 1:] - z_vals[..., :-1]
-        dists = torch.cat([dists, torch.Tensor([sample_dist]).expand(dists[..., :1].shape)], -1)
-        mid_z_vals = z_vals + dists * 0.5
-
-        # Section midpoints
-        pts = rays_o[:, None, :] + rays_d[:, None, :] * mid_z_vals[..., :, None]  # n_rays, n_samples, 3
-        dirs = rays_d[:, None, :].expand(pts.shape)
-
-        pts = pts.reshape(-1, 3)
-        dirs = dirs.reshape(-1, 3)
-
-        sdf_nn_output = sdf_network(pts)
-        sdf = sdf_nn_output[:, :1]
-        feature_vector = sdf_nn_output[:, 1:]
-
-        gradients = sdf_network.gradient(pts).squeeze()
-        sampled_color = color_network(pts, gradients, dirs, feature_vector).reshape(batch_size, n_samples, 3)
-
-        inv_s = deviation_network(torch.zeros([1, 3]))[:, :1].clip(1e-6, 1e6)  # Single parameter
-        inv_s = inv_s.expand(batch_size * n_samples, 1)
-
-        true_cos = (dirs * gradients).sum(-1, keepdim=True)
-
-        # "cos_anneal_ratio" grows from 0 to 1 in the beginning training iterations. The anneal strategy below makes
-        # the cos value "not dead" at the beginning training iterations, for better convergence.
-        iter_cos = -(F.relu(-true_cos * 0.5 + 0.5) * (1.0 - cos_anneal_ratio) +
-                     F.relu(-true_cos) * cos_anneal_ratio)  # always non-positive
-
-        # Estimate signed distances at section points
-        estimated_next_sdf = sdf + iter_cos * dists.reshape(-1, 1) * 0.5
-        estimated_prev_sdf = sdf - iter_cos * dists.reshape(-1, 1) * 0.5
-
-        prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
-        next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
-
-        p = prev_cdf - next_cdf
-        c = prev_cdf
-
-        alpha = ((p + 1e-5) / (c + 1e-5)).reshape(batch_size, n_samples).clip(0.0, 1.0)
-
-        pts_norm = torch.linalg.norm(pts, ord=2, dim=-1, keepdim=True).reshape(batch_size, n_samples)
-        inside_sphere = (pts_norm < 1.0).float().detach()
-        relax_inside_sphere = (pts_norm < 1.2).float().detach()
-
-        # Render with background
-        sphere_color = sampled_color
-        if background_alpha is not None:
-            alpha = alpha * inside_sphere + background_alpha[:, :n_samples] * (1.0 - inside_sphere)
-            alpha = torch.cat([alpha, background_alpha[:, n_samples:]], dim=-1)
-            sampled_color = sampled_color * inside_sphere[:, :, None] + \
-                            background_sampled_color[:, :n_samples] * (1.0 - inside_sphere)[:, :, None]
-            sphere_color = sampled_color
-            sampled_color = torch.cat([sampled_color, background_sampled_color[:, n_samples:]], dim=1)
-
-        weights = alpha * torch.cumprod(torch.cat([torch.ones([batch_size, 1]), 1. - alpha + 1e-7], -1), -1)[:, :-1]
-        weights_sum = weights.sum(dim=-1, keepdim=True)
-
-        # region 测试
-        debug = False
-        if(debug):
-            import matplotlib.pyplot as plt
-            from matplotlib.ticker import FuncFormatter
-            from mpl_toolkits.mplot3d import Axes3D
-
-            # print(pts.shape)
-            # print(pts[:256])
-            # print(sdf[:256])
-
-            # min_v = min(sdf)
-            # max_v = max(sdf)
-            # color = [plt.get_cmap("seismic", 100)(int(float(i - min_v) / (max_v - min_v) * 100)) for i in sdf]
-            color = np.zeros((batch_size, n_samples, 4))
-            color[:, :, :3] = sphere_color.detach().cpu().numpy()
-            # color[:, :, 3] = 1
-            color[:, :, 3] = weights[:, :n_samples].detach().cpu().numpy()
-
-            pt = pts.detach().cpu().numpy()
-            weight = weights.reshape((-1))
-            color = color.reshape((-1, 4))
-            # print(color.shape)
-            # print(color[:128])
-            # print(weight[:128])
-            # print(max(weight))
-            # print(min(weight))
-
-            fig = plt.figure()
-            plt.set_cmap(plt.get_cmap("seismic", 100))
-            ax = Axes3D(fig)
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.set_zlabel('z')
-            x = []
-            y = []
-            z = []
-            a = []
-            for i in range(pts.shape[0]):
-                if(weight[i] > 0.01):
-                    x.append(pt[i, 0])
-                    y.append(pt[i, 1])
-                    z.append(pt[i, 2])
-                    a.append(color[i])
-            im = ax.scatter(x, y, z, c=a)
-            # fig.colorbar(im, format=FuncFormatter(lambda x, _: x * (max_v - min_v) + min_v))
-            plt.show()
-        # endregion
-
-        color = (sampled_color * weights[:, :, None]).sum(dim=1)
-        if (generate_mask):
-            color = (weights_sum >= 1.0)
-            # color = (weights_sum >= 0.01)
-            color = torch.broadcast_to(color, (-1, 3))
-        else:
-            if background_rgb is not None:  # Fixed background, usually black
-                color = color + background_rgb * (1.0 - weights_sum)
-
-        # Eikonal loss
-        gradient_error = (torch.linalg.norm(gradients.reshape(batch_size, n_samples, 3), ord=2,
-                                            dim=-1) - 1.0) ** 2
-        gradient_error = (relax_inside_sphere * gradient_error).sum() / (relax_inside_sphere.sum() + 1e-5)
-
-        return {
-            'color': color,
-            'sdf': sdf,
-            'dists': dists,
-            'gradients': gradients.reshape(batch_size, n_samples, 3),
-            's_val': 1.0 / inv_s,
-            'mid_z_vals': mid_z_vals,
-            'pts': pts.reshape((batch_size, n_samples, 3)),
-            'sphere_colors': sphere_color,
             'weights': weights,
             'cdf': c.reshape(batch_size, n_samples),
             'gradient_error': gradient_error,
@@ -445,16 +291,16 @@ class NeuSRenderer:
     def render(self, rays_o, rays_d, near, far, perturb_overwrite=-1, background_rgb=None, cos_anneal_ratio=0.0,
                generate_mask=False):
         batch_size = len(rays_o)
-        sample_dist = 2.0 / self.n_samples  # Assuming the region of interest is a unit sphere，切割ray用的，在直径范围内切成64段
+        sample_dist = 2.0 / self.n_samples  # Assuming the region of interest is a unit sphere
         z_vals = torch.linspace(0.0, 1.0, self.n_samples)
         z_vals = near + (far - near) * z_vals[None, :]
 
-        z_vals_outside = None  # 我猜是超出region of interest的切割，切成32段
+        z_vals_outside = None
         if self.n_outside > 0:
             z_vals_outside = torch.linspace(1e-3, 1.0 - 1.0 / (self.n_outside + 1.0), self.n_outside)
 
         n_samples = self.n_samples
-        perturb = self.perturb  # 扰乱
+        perturb = self.perturb
 
         if perturb_overwrite >= 0:
             perturb = perturb_overwrite
@@ -471,17 +317,14 @@ class NeuSRenderer:
 
         if self.n_outside > 0:
             z_vals_outside = far / torch.flip(z_vals_outside, dims=[-1]) + 1.0 / self.n_samples
-        # print(z_vals[0])
-        # print(z_vals_outside[0]) # 打出来就很明确了，就是rays中的断点所在长度值
 
         background_alpha = None
         background_sampled_color = None
 
         # Up sample
-        if self.n_importance > 0:  # n_importance=64，即升采样64个点
+        if self.n_importance > 0:
             with torch.no_grad():
                 pts = rays_o[:, None, :] + rays_d[:, None, :] * z_vals[..., :, None]
-                # print(pts.shape) 256 * 64 * 3，所有该batch的射线在region of interest中取的点
                 sdf = self.sdf_network.sdf(pts.reshape(-1, 3)).reshape(batch_size, self.n_samples)
 
                 for i in range(self.up_sample_steps):
@@ -497,37 +340,32 @@ class NeuSRenderer:
                                                   new_z_vals,
                                                   sdf,
                                                   last=(i + 1 == self.up_sample_steps))
-                # print(z_vals.shape) 256 * 128 (64+64)
 
             n_samples = self.n_samples + self.n_importance
 
         # Background model
         if self.n_outside > 0:
-            z_vals_feed = torch.cat([z_vals, z_vals_outside], dim=-1)  # 128 + 32 = 160
+            z_vals_feed = torch.cat([z_vals, z_vals_outside], dim=-1)
             z_vals_feed, _ = torch.sort(z_vals_feed, dim=-1)
             ret_outside = self.render_core_outside(rays_o, rays_d, z_vals_feed, sample_dist, self.nerf)
-            # print(ret_outside['color'].shape)  # 512 * 3 (512/256就是batch)
-            # print(ret_outside['sampled_color'].shape)  # 512 * 160 * 3
-            # print(ret_outside['alpha'].shape)
-            # print(ret_outside['weights'].shape)
 
             background_sampled_color = ret_outside['sampled_color']
             background_alpha = ret_outside['alpha']
 
         # Render core
         # ret_fine = self.render_core
-        ret_fine = self.render_core_research(rays_o,
-                                             rays_d,
-                                             z_vals,
-                                             sample_dist,
-                                             self.sdf_network,
-                                             self.deviation_network,
-                                             self.color_network,
-                                             background_rgb=background_rgb,
-                                             background_alpha=background_alpha,
-                                             background_sampled_color=background_sampled_color,
-                                             cos_anneal_ratio=cos_anneal_ratio,
-                                             generate_mask=generate_mask)
+        ret_fine = self.render_core(rays_o,
+                                    rays_d,
+                                    z_vals,
+                                    sample_dist,
+                                    self.sdf_network,
+                                    self.deviation_network,
+                                    self.color_network,
+                                    background_rgb=background_rgb,
+                                    background_alpha=background_alpha,
+                                    background_sampled_color=background_sampled_color,
+                                    cos_anneal_ratio=cos_anneal_ratio,
+                                    generate_mask=generate_mask)
 
         color_fine = ret_fine['color']
         weights = ret_fine['weights']
@@ -542,8 +380,6 @@ class NeuSRenderer:
             'weight_sum': weights_sum,
             'weight_max': torch.max(weights, dim=-1, keepdim=True)[0],
             'gradients': gradients,
-            'pts': ret_fine['pts'],  # test
-            'sphere_colors': ret_fine['sphere_colors'],  # test
             'weights': weights,
             'gradient_error': ret_fine['gradient_error'],
             'inside_sphere': ret_fine['inside_sphere']
