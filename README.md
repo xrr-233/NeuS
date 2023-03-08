@@ -3,3 +3,5 @@ Thanks for the great work by @Totoro97. For the original work, please see https:
 We use the joint method of IDR and NeuS to reconstruct a textured 3D object.
 
 ![example.png](./docs/example.png)
+
+For experimental information, please see https://github.com/xrr-233/Textured-NeuS-utils.

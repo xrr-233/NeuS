@@ -1,6 +1,16 @@
 ### JOB ###########################
-executable      = ~/Programs/anaconda3/envs/NeuS/bin/python
-arguments       = exp_runner.py --mode train --conf ./confs/womask.conf --case data_DTU/dtu_scan24
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --conf ./confs/womask.conf --case BlendedMVS_preprocessed/5a7d3db14989e929563eb153
+# input           =
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --conf ./confs/womask.conf --case BlendedMVS_preprocessed/5c1af2e2bee9a723c963d019
 # input           =
 output          = NeuS.out
 error           = $(output).err

@@ -1,8 +1,8 @@
 import os
-import logging
+os.environ['PATH'] = "/home/bsft19/ruixu33/Programs/anaconda3/bin:/home/bsft19/ruixu33/Programs/anaconda3/condabin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/games:/usr/local/games:/home/bsft19/ruixu33/Programs/anaconda3/bin"
+
 import argparse
 import cv2
-import trimesh
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -43,36 +43,6 @@ def validate_image(rays_o, rays_d, filename='validations_fine.png', generate_mas
     print("Validation end")
 
 
-def set_vertex_color(resolution, threshold):
-    print('Start exporting textured mesh')
-
-    bound_min = torch.tensor(runner.dataset.object_bbox_min, dtype=torch.float32)
-    bound_max = torch.tensor(runner.dataset.object_bbox_max, dtype=torch.float32)
-    vertices, triangles = runner.renderer.extract_geometry(bound_min, bound_max, resolution=resolution, threshold=threshold)
-    print(f'Vertices count: {vertices.shape[0]}')
-
-    vertices = torch.tensor(vertices, dtype=torch.float32)
-    vertices_batch = vertices.split(runner.batch_size)
-    render_iter = len(vertices_batch)
-
-    vertex_colors = []
-    for iter in tqdm(range(render_iter)):
-        feature_vector = runner.sdf_network.sdf_hidden_appearance(vertices_batch[iter])
-        gradients = runner.sdf_network.gradient(vertices_batch[iter]).squeeze()
-        dirs = -gradients
-        vertex_color = runner.color_network(vertices_batch[iter], gradients, dirs, feature_vector).detach().cpu().numpy()[..., ::-1]  # BGR to RGB
-        vertex_colors.append(vertex_color)
-    vertex_colors = np.concatenate(vertex_colors)
-    print(f'validate point count: {vertex_colors.shape[0]}')
-    vertices = vertices.detach().cpu().numpy()
-    # print(vertices.shape, triangles.shape, vertex_colors.shape)
-
-    mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_colors)
-    mesh.export(os.path.join(runner.base_exp_dir, 'meshes', 'vertex_color.ply'))
-
-    logging.info('End')
-
-
 def generate_mask():
     img_num = runner.dataset.n_images
     os.makedirs('masks', exist_ok=True)
@@ -97,7 +67,7 @@ if __name__ == '__main__':
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
     parser.add_argument('--is_continue', default=True, action="store_true")
     parser.add_argument('--gpu', type=int, default=0)
-    parser.add_argument('--case', type=str, default='haibao/preprocessed')  # Please specify your dataset folder in the 'exp' folder
+    parser.add_argument('--case', type=str)  # Please specify your dataset folder in the 'exp' folder
 
     parser.add_argument('--train_resolution', type=int, default=64)
     parser.add_argument('--validate_resolution', type=int, default=512)  # Higher value, clearer effect, default=512
@@ -111,10 +81,9 @@ if __name__ == '__main__':
     runner = Runner(args.conf, args.mode, args.case, args.is_continue)
 
     if args.mode == 'train':
-        runner.train(resolution=args.train_resolution)
+        runner.train(resolution=args.train_resolution, final_resolution=args.validate_resolution, threshold=args.mcube_threshold)
     elif args.mode == 'validate_mesh':
-        # runner.validate_mesh(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold)
-        set_vertex_color(resolution=args.validate_resolution, threshold=args.mcube_threshold)
+        runner.validate_mesh_vertex_color(world_space=True, resolution=args.validate_resolution, threshold=args.mcube_threshold, name='self_defined_result')
     elif args.mode == 'generate_mask':
         generate_mask()
     elif args.mode.startswith('interpolate'):  # Interpolate views given two image indices

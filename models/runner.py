@@ -91,7 +91,7 @@ class Runner:
         if self.mode[:5] == 'train':
             self.file_backup()
 
-    def train(self, resolution):
+    def train(self, resolution, final_resolution, threshold):
         self.writer = SummaryWriter(log_dir=os.path.join(self.base_exp_dir, 'logs'))
         self.update_learning_rate()
         res_step = self.end_iter - self.iter_step
@@ -151,6 +151,9 @@ class Runner:
             self.writer.add_scalar('Statistics/weight_max', (weight_max * mask).sum() / mask_sum, self.iter_step)
             self.writer.add_scalar('Statistics/psnr', psnr, self.iter_step)
 
+            if self.iter_step == self.end_iter:
+                self.validate_mesh_vertex_color(world_space=True, resolution=final_resolution, threshold=threshold, name='final_result')
+
             if self.iter_step % self.report_freq == 0:
                 print(self.base_exp_dir)
                 print('iter:{:8>d} loss = {} lr={}'.format(self.iter_step, loss, self.optimizer.param_groups[0]['lr']))
@@ -162,7 +165,7 @@ class Runner:
                 self.validate_image()
 
             if self.iter_step % self.val_mesh_freq == 0:
-                self.validate_mesh(resolution=resolution)
+                self.validate_mesh_vertex_color(resolution=resolution)
 
             self.update_learning_rate()
 
@@ -367,6 +370,42 @@ class Runner:
 
         mesh = trimesh.Trimesh(vertices, triangles)
         mesh.export(os.path.join(self.base_exp_dir, 'meshes', '{:0>8d}.ply'.format(self.iter_step)))
+
+        logging.info('End')
+
+    def validate_mesh_vertex_color(self, world_space=False, resolution=64, threshold=0.0, name=None):
+        print('Start exporting textured mesh')
+
+        bound_min = torch.tensor(self.dataset.object_bbox_min, dtype=torch.float32)
+        bound_max = torch.tensor(self.dataset.object_bbox_max, dtype=torch.float32)
+        vertices, triangles = self.renderer.extract_geometry(bound_min, bound_max, resolution=resolution,
+                                                               threshold=threshold)
+        print(f'Vertices count: {vertices.shape[0]}')
+
+        vertices = torch.tensor(vertices, dtype=torch.float32)
+        vertices_batch = vertices.split(self.batch_size)
+        render_iter = len(vertices_batch)
+
+        vertex_colors = []
+        for iter in tqdm(range(render_iter)):
+            feature_vector = self.sdf_network.sdf_hidden_appearance(vertices_batch[iter])
+            gradients = self.sdf_network.gradient(vertices_batch[iter]).squeeze()
+            dirs = -gradients
+            vertex_color = self.color_network(vertices_batch[iter], gradients, dirs,
+                                                feature_vector).detach().cpu().numpy()[..., ::-1]  # BGR to RGB
+            vertex_colors.append(vertex_color)
+        vertex_colors = np.concatenate(vertex_colors)
+        print(f'validate point count: {vertex_colors.shape[0]}')
+        vertices = vertices.detach().cpu().numpy()
+
+        if world_space:
+            vertices = vertices * self.dataset.scale_mats_np[0][0, 0] + self.dataset.scale_mats_np[0][:3, 3][None]
+
+        mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_colors)
+        if name is not None:
+            mesh.export(os.path.join(self.base_exp_dir, 'meshes', f'{name}.ply'))
+        else:
+            mesh.export(os.path.join(self.base_exp_dir, 'meshes', '{:0>8d}_vertex_color.ply'.format(self.iter_step)))
 
         logging.info('End')
 
