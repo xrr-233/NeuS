@@ -65,7 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('--conf', type=str, default='./confs/womask.conf')
     parser.add_argument('--mode', type=str, default='validate_mesh')
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
-    parser.add_argument('--is_continue', default=True, action="store_true")
+    parser.add_argument('--is_continue', default=False, action="store_true")
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--case', type=str)  # Please specify your dataset folder in the 'exp' folder
 

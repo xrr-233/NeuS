@@ -401,6 +401,7 @@ class Runner:
         if world_space:
             vertices = vertices * self.dataset.scale_mats_np[0][0, 0] + self.dataset.scale_mats_np[0][:3, 3][None]
 
+        os.makedirs(os.path.join(self.base_exp_dir, 'meshes'), exist_ok=True)
         mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_colors)
         if name is not None:
             mesh.export(os.path.join(self.base_exp_dir, 'meshes', f'{name}.ply'))
