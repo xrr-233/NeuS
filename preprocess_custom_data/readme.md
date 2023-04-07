@@ -2,48 +2,7 @@
 
 # Training NeuS Using Your Custom Data
 
-
-
-### [Example data link](https://drive.google.com/file/d/1nZBY--rvi3dUKGVz-d1jCpppkeD_tBiB/view?usp=sharing)
-
-
-
-### Option 1. Use ArUco 
-
-We take the images in `examples/thin_catbus` for example. These images were captured with an ArUco board. The pattern image of this board can be found in `./static/aruco_board.png`.
-
-**Step 1. Build the calibration code (c++)**  
-
-Dependencies: 
-
-- cnpy (https://github.com/rogersce/cnpy)
-- OpenCV
-
-Run commands
-
-```
-cd aruco_preprocess
-mkdir build
-cd build
-cmake .. & make
-cd ..
-```
-
-**Step 2. Get the preprocessed data**
-
-First indicate `data_dir`,`n_images` in `run.sh`. For example, `data_dir=./example/thin_catbus`
-
-Run commands
-
-```
-bash run.sh
-```
-
-Then the preprocessed data can be found in `${data_dir}/preprocessed`. Here we define the region of interest as the bounding sphere of the calibration board.
-
-
-
-### Option 2. Use COLMAP
+For dataset captured by hand, we use COLMAP SfM to transfer the dataset to the form that NeuS can accept.
 
 **Step 1. Run COLMAP SfM**
 
@@ -51,12 +10,12 @@ Run  commands
 
 ```
 cd colmap_preprocess
-python img2poses.py ${data_dir}
+python imgs2poses.py ${data_dir}
 ```
 
 After running the commands above, a sparse point cloud is saved in `${data_dir}/sparse_points.ply`.
 
-**Step 2. Define the region of interest**
+**Step 2. Define the region of interest (Optional)**
 
 The raw sparse point cloud may be noisy and may not be appropriate to define a region of interest (The white frame indicates the bounding box of the point cloud):
 

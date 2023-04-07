@@ -1,0 +1,134 @@
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan24
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan37
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan40
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan55
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan63
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan65
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan69
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan83
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan97
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan105
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan106
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan110
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan114
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan118
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
+
+### JOB ###########################
+executable      = /home/bsft19/ruixu33/Programs/anaconda3/envs/NeuS/bin/python
+arguments       = exp_runner.py --mode train --case DTUDataset_preprocessed/scan122
+output          = NeuS.out
+error           = $(output).err
+log             = NeuS.log
+
+queue
